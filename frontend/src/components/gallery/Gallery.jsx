@@ -27,7 +27,7 @@ const Gallery = () => {
     try {
       setLoading(true);
       // Fetch photos
-      const photosResponse = await fetch(`http://localhost:3001/api/gallery/photos?user_id=${user_id}`, {
+      const photosResponse = await fetch(`https://testdockerbackend.azurewebsites.net/api/gallery/photos?user_id=${user_id}`, {
         method: "GET",
         headers: {
           "Content-Type": "application/json",
@@ -41,7 +41,7 @@ const Gallery = () => {
       const photosData = await photosResponse.json();
       
       // Fetch videos
-      const videosResponse = await fetch(`http://localhost:3001/api/gallery/videos?user_id=${user_id}`, {
+      const videosResponse = await fetch(`https://testdockerbackend.azurewebsites.net/api/gallery/videos?user_id=${user_id}`, {
         method: "GET",
         headers: {
           "Content-Type": "application/json",

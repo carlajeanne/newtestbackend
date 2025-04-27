@@ -29,7 +29,7 @@ const UserDetails = () => {
       }
 
       try {
-        const response = await fetch(`http://localhost:3001/api/user/user-details?user_id=${user_id}`, {
+        const response = await fetch(`https://testdockerbackend.azurewebsites.net/api/user/user-details?user_id=${user_id}`, {
           method: "GET",
           headers: {
             "Content-Type": "application/json",
@@ -94,7 +94,7 @@ const UserDetails = () => {
     formData.append('user_id', userId);
 
     try {
-      const response = await fetch('http://localhost:3001/api/user/upload-profile-picture', {
+      const response = await fetch('https://testdockerbackend.azurewebsites.net/api/user/upload-profile-picture', {
         method: 'POST',
         body: formData
       });
@@ -125,7 +125,7 @@ const UserDetails = () => {
         await uploadProfilePicture(user_id, selectedFile);
       }
   
-      const response = await fetch(`http://localhost:3001/api/user/user-details?user_id=${user_id}`, {
+      const response = await fetch(`https://testdockerbackend.azurewebsites.net/api/user/user-details?user_id=${user_id}`, {
         method: "PUT",
         headers: {
           "Content-Type": "application/json",

@@ -23,7 +23,7 @@ function App() {
         }
     
         try {
-          const response = await fetch("http://localhost:3001/api/auth/verify-token", {
+          const response = await fetch("https://testdockerbackend.azurewebsites.net/api/auth/verify-token", {
             method: "GET",
             headers: { Authorization: `Bearer ${token}` },
           });

@@ -22,7 +22,7 @@ const VideoModal = ({ video, onClose, onVideoDeleted }) => {
       }
       
       // Generate download URL using backend endpoint
-      const downloadUrl = `http://localhost:3001/api/gallery/download/${video.id}?user_id=${userId}`;
+      const downloadUrl = `https://testdockerbackend.azurewebsites.net/api/gallery/download/${video.id}?user_id=${userId}`;
       
       // Create and click a download link
       const link = document.createElement('a');
@@ -51,7 +51,7 @@ const VideoModal = ({ video, onClose, onVideoDeleted }) => {
           throw new Error('User not logged in');
         }
         
-        const response = await fetch('http://localhost:3001/api/gallery/delete', {
+        const response = await fetch('https://testdockerbackend.azurewebsites.net/api/gallery/delete', {
           method: 'DELETE',
           headers: {
             'Content-Type': 'application/json',

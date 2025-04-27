@@ -68,7 +68,7 @@ export default function SignUp({ toggleModal, openSignInModal, openTermsModal })
         }
     
         try {
-            const response = await fetch('http://localhost:3001/api/auth/register', {
+            const response = await fetch('https://testdockerbackend.azurewebsites.net/api/auth/register', {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',

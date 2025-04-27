@@ -21,7 +21,7 @@ const PhotoModal = ({ photo, onClose, onPhotoDeleted }) => {
       }
       
       // Generate download URL using backend endpoint
-      const downloadUrl = `http://localhost:3001/api/gallery/download/${photo.id}?user_id=${userId}`;
+      const downloadUrl = `https://testdockerbackend.azurewebsites.net/api/gallery/download/${photo.id}?user_id=${userId}`;
       
       // Create and click a download link
       const link = document.createElement('a');
@@ -50,7 +50,7 @@ const PhotoModal = ({ photo, onClose, onPhotoDeleted }) => {
           throw new Error('User not logged in');
         }
         
-        const response = await fetch('http://localhost:3001/api/gallery/delete', {
+        const response = await fetch('https://testdockerbackend.azurewebsites.net/api/gallery/delete', {
           method: 'DELETE',
           headers: {
             'Content-Type': 'application/json',

@@ -52,7 +52,7 @@ export default function ResetPassword({ toggleModal, toggleSignInModal }) {
         }
 
         try {
-            const response = await fetch('http://localhost:3001/api/auth/reset-password', {
+            const response = await fetch('https://testdockerbackend.azurewebsites.net/api/auth/reset-password', {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',

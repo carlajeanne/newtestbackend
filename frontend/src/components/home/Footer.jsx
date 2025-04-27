@@ -17,7 +17,7 @@ const Footer = () => {
     setMessage(null);
 
     try {
-      const response = await fetch('http://localhost:3001/api/email/subscribe', {
+      const response = await fetch('https://testdockerbackend.azurewebsites.net/api/email/subscribe', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

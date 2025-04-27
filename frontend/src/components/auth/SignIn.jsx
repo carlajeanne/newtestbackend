@@ -44,7 +44,7 @@ export default function SignIn({ toggleModal, openSignUpModal, openForgotPassMod
     
         try {
             // Send login request to backend
-            const response = await fetch('http://localhost:3001/api/auth/login', {
+            const response = await fetch('https://testdockerbackend.azurewebsites.net/api/auth/login', {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
