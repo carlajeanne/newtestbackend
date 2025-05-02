@@ -3,6 +3,14 @@ import FetchingOverviewModal from './FetchingOverview';
 import FetchingFeature from './FetchingFeature';
 
 export default function FetchingHome() {
+    const handleButtonClick = async () => {
+        const res = await fetch('https://testdockerbackend.azurewebsites.net/api/fetching/led', {
+          method: 'POST',
+        });
+        const data = await res.json();
+        console.log(data);
+    };
+
     const [isOverviewOpen, setIsOverviewOpen] = useState(false);
     const [isFeatureOpen, setIsFeatureOpen] = useState(false);
 
@@ -57,6 +65,7 @@ export default function FetchingHome() {
 
             <button 
                 className="text-md font-lg text-white rounded-full bg-dark-grayish-orange px-3 py-2 hover:bg-yellow transition duration-300">
+                onClick={handleButtonClick}
                 Start Fetching
             </button>
         </div>
