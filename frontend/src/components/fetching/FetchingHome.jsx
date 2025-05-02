@@ -64,8 +64,8 @@ export default function FetchingHome() {
             ></iframe>
 
             <button 
-                className="text-md font-lg text-white rounded-full bg-dark-grayish-orange px-3 py-2 hover:bg-yellow transition duration-300">
-                onClick={handleButtonClick}
+                className="text-md font-lg text-white rounded-full bg-dark-grayish-orange px-3 py-2 hover:bg-yellow transition duration-300"
+                onClick={handleButtonClick}>
                 Start Fetching
             </button>
         </div>
