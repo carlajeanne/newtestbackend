@@ -4,7 +4,7 @@ import FetchingFeature from './FetchingFeature';
 
 export default function FetchingHome() {
     const handleButtonClick = async () => {
-        const res = await fetch('https://testdockerbackend.azurewebsites.net/api/fetching/led', {
+        const res = await fetch('https://testdockerbackend.azurewebsites.net/api/fetching/fetch', {
           method: 'POST',
         });
         const data = await res.json();
