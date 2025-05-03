@@ -55,18 +55,10 @@ export default function FetchingHome() {
         }
     };
     
-    // For debugging - simulate telemetry
-    const simulateTelemetry = async () => {
-        try {
-            const res = await fetch(`${API_BASE_URL}/simulate_telemetry`, {
-                method: 'POST'
-            });
-            const data = await res.json();
-            console.log('Simulated telemetry:', data);
-            checkEsp32Status();
-        } catch (error) {
-            console.error('Error simulating telemetry:', error);
-        }
+    // Force status refresh
+    const refreshStatus = () => {
+        setEsp32Status('Refreshing status...');
+        checkEsp32Status();
     };
 
     // Modal control functions
@@ -135,11 +127,11 @@ export default function FetchingHome() {
                         Start Fetching
                     </button>
                     
-                    {/* Debug button - remove in production */}
+                    {/* Refresh status button */}
                     <button 
                         className="text-sm text-gray-600 rounded-full bg-gray-200 px-4 py-2 hover:bg-gray-300 transition duration-300"
-                        onClick={simulateTelemetry}>
-                        Simulate ESP32 Telemetry (Debug)
+                        onClick={refreshStatus}>
+                        Refresh Status
                     </button>
                 </div>
             </div>
