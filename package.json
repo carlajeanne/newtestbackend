@@ -4,6 +4,7 @@
     "cursor": "^0.1.5",
     "lucide-react": "^0.469.0",
     "react-chartjs-2": "^5.3.0",
-    "react-router-dom": "^7.1.1"
+    "react-router-dom": "^7.1.1",
+    "socket.io-client": "^4.8.1"
   }
 }
