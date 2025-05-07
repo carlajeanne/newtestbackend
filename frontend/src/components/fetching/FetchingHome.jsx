@@ -13,7 +13,7 @@ export default function FetchingHome() {
     
     // Constants
     const API_BASE_URL = 'https://testdockerbackend.azurewebsites.net/api/fetching';
-    const AUDIO_ENDPOINT = 'http://192.168.1.192/audio'; // Replace with your ESP32's actual IP address
+    const AUDIO_ENDPOINT = 'http://192.168.1.192'; // Replace with your ESP32's actual IP address
 
     // Function to check ESP32 status
     const checkEsp32Status = async () => {
