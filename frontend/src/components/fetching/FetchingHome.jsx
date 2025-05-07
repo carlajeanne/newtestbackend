@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import FetchingOverviewModal from './FetchingOverview';
 import FetchingFeature from './FetchingFeature';
 
@@ -7,9 +7,13 @@ export default function FetchingHome() {
     const [isFeatureOpen, setIsFeatureOpen] = useState(false);
     const [esp32Status, setEsp32Status] = useState('Checking ESP32 status...');
     const [isConnected, setIsConnected] = useState(false);
+    const [isRecording, setIsRecording] = useState(false);
+    const mediaRecorderRef = useRef(null);
+    const audioChunksRef = useRef([]);
     
     // Constants
     const API_BASE_URL = 'https://testdockerbackend.azurewebsites.net/api/fetching';
+    const AUDIO_ENDPOINT = 'http://192.168.1.140/audio'; // Replace with your ESP32's actual IP address
 
     // Function to check ESP32 status
     const checkEsp32Status = async () => {
@@ -36,22 +40,106 @@ export default function FetchingHome() {
         return () => clearInterval(intervalId);
     }, []);
 
-    const handleButtonClick = async () => {
+    // Start audio recording and streaming to ESP32
+    const startAudioStreaming = async () => {
         try {
-            setEsp32Status('Sending fetch command...');
-            const res = await fetch(`${API_BASE_URL}/fetch`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' }
-            });
-            const data = await res.json();
-            console.log('Fetch response:', data);
-            setEsp32Status(`Command sent: ${data.status}`);
+            setEsp32Status('Starting audio stream...');
             
-            // Check status again after a short delay
-            setTimeout(checkEsp32Status, 3000);
+            // Request microphone access
+            const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+            
+            // Create media recorder
+            const mediaRecorder = new MediaRecorder(stream, {
+                mimeType: 'audio/webm',
+                audioBitsPerSecond: 16000  // 16kHz sample rate suitable for speech
+            });
+            
+            mediaRecorderRef.current = mediaRecorder;
+            audioChunksRef.current = [];
+            
+            // Handle data available event
+            mediaRecorder.ondataavailable = (event) => {
+                if (event.data.size > 0) {
+                    audioChunksRef.current.push(event.data);
+                    
+                    // Send the audio chunk to ESP32
+                    sendAudioChunkToESP32(event.data);
+                }
+            };
+            
+            // Handle recording stop
+            mediaRecorder.onstop = () => {
+                console.log('Recording stopped');
+                setIsRecording(false);
+                stream.getTracks().forEach(track => track.stop());
+            };
+            
+            // Start recording with 100ms chunks for low latency
+            mediaRecorder.start(100);
+            setIsRecording(true);
+            setEsp32Status('Recording and streaming audio to ESP32...');
+            
         } catch (error) {
-            console.error('Error sending fetch command:', error);
-            setEsp32Status('Error sending command to ESP32');
+            console.error('Error starting audio stream:', error);
+            setEsp32Status('Error accessing microphone');
+            setIsRecording(false);
+        }
+    };
+    
+    // Stop audio recording
+    const stopAudioStreaming = () => {
+        if (mediaRecorderRef.current && isRecording) {
+            mediaRecorderRef.current.stop();
+            setEsp32Status('Audio stream stopped');
+        }
+    };
+    
+    // Send audio chunk to ESP32
+    const sendAudioChunkToESP32 = async (audioChunk) => {
+        try {
+            const reader = new FileReader();
+            reader.readAsArrayBuffer(audioChunk);
+            
+            reader.onloadend = async () => {
+                const arrayBuffer = reader.result;
+                
+                // Send the audio data to ESP32
+                await fetch(AUDIO_ENDPOINT, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'audio/webm',
+                    },
+                    body: arrayBuffer
+                });
+            };
+        } catch (error) {
+            console.error('Error sending audio to ESP32:', error);
+        }
+    };
+
+    const handleButtonClick = async () => {
+        if (isRecording) {
+            stopAudioStreaming();
+        } else {
+            try {
+                // Send fetch command first
+                setEsp32Status('Sending fetch command...');
+                const res = await fetch(`${API_BASE_URL}/fetch`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' }
+                });
+                const data = await res.json();
+                console.log('Fetch response:', data);
+                
+                // Start audio streaming
+                await startAudioStreaming();
+                
+                // Check status again after a short delay
+                setTimeout(checkEsp32Status, 3000);
+            } catch (error) {
+                console.error('Error:', error);
+                setEsp32Status('Error sending command or starting audio');
+            }
         }
     };
     
@@ -83,6 +171,13 @@ export default function FetchingHome() {
     useEffect(() => {
         // Open the initial modal
         openModal();
+        
+        // Clean up on component unmount
+        return () => {
+            if (isRecording && mediaRecorderRef.current) {
+                mediaRecorderRef.current.stop();
+            }
+        };
     }, []);
 
     const video = {
@@ -109,7 +204,7 @@ export default function FetchingHome() {
                 title={video.title}
                 allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
                 allowFullScreen
-                className='pb-2'
+                className="pb-2"
             ></iframe>
 
             <div className="flex flex-col items-center gap-4 w-full max-w-md">
@@ -121,10 +216,14 @@ export default function FetchingHome() {
                 {/* Control Buttons */}
                 <div className="flex flex-col gap-3 w-full">
                     <button 
-                        className="text-md font-lg text-white rounded-full bg-dark-grayish-orange px-6 py-3 hover:bg-yellow transition duration-300 disabled:opacity-50 disabled:cursor-not-allowed"
+                        className={`text-md font-lg text-white rounded-full px-6 py-3 transition duration-300 disabled:opacity-50 disabled:cursor-not-allowed ${
+                            isRecording 
+                                ? 'bg-red-600 hover:bg-red-700' 
+                                : 'bg-dark-grayish-orange hover:bg-yellow'
+                        }`}
                         onClick={handleButtonClick}
                         disabled={!isConnected}>
-                        Start Fetching
+                        {isRecording ? 'Stop' : 'Start'}
                     </button>
                     
                     {/* Refresh status button */}
