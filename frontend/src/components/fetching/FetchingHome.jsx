@@ -10,10 +10,11 @@ export default function FetchingHome() {
     const [isRecording, setIsRecording] = useState(false);
     const mediaRecorderRef = useRef(null);
     const audioChunksRef = useRef([]);
+    const webSocketRef = useRef(null);
     
     // Constants
     const API_BASE_URL = 'https://testdockerbackend.azurewebsites.net/api/fetching';
-    const AUDIO_ENDPOINT = 'http://192.168.1.192'; // Replace with your ESP32's actual IP address
+    const WEBSOCKET_URL = 'ws://192.168.1.192:81'; // ESP32 WebSocket URL with port 81
 
     // Function to check ESP32 status
     const checkEsp32Status = async () => {
@@ -30,14 +31,66 @@ export default function FetchingHome() {
         }
     };
 
+    // Initialize WebSocket connection
+    const initWebSocket = () => {
+        // Close existing connection if any
+        if (webSocketRef.current && webSocketRef.current.readyState === WebSocket.OPEN) {
+            webSocketRef.current.close();
+        }
+
+        try {
+            const socket = new WebSocket(WEBSOCKET_URL);
+            
+            socket.onopen = () => {
+                console.log('WebSocket connection established');
+                setEsp32Status('WebSocket connected to ESP32');
+                setIsConnected(true);
+            };
+            
+            socket.onclose = (event) => {
+                console.log('WebSocket connection closed', event);
+                setEsp32Status('WebSocket disconnected');
+                setIsConnected(false);
+            };
+            
+            socket.onerror = (error) => {
+                console.error('WebSocket error:', error);
+                setEsp32Status('WebSocket connection error');
+                setIsConnected(false);
+            };
+            
+            webSocketRef.current = socket;
+        } catch (error) {
+            console.error('Error creating WebSocket:', error);
+            setEsp32Status('Error creating WebSocket connection');
+            setIsConnected(false);
+        }
+    };
+
     // Check status on component mount and periodically
     useEffect(() => {
         checkEsp32Status();
+        initWebSocket();
         
         // Check status every 15 seconds
-        const intervalId = setInterval(checkEsp32Status, 15000);
+        const intervalId = setInterval(() => {
+            checkEsp32Status();
+            
+            // If WebSocket is closed or closing, try to reconnect
+            if (webSocketRef.current && 
+                (webSocketRef.current.readyState === WebSocket.CLOSED || 
+                 webSocketRef.current.readyState === WebSocket.CLOSING)) {
+                initWebSocket();
+            }
+        }, 15000);
         
-        return () => clearInterval(intervalId);
+        return () => {
+            clearInterval(intervalId);
+            // Close WebSocket on component unmount
+            if (webSocketRef.current) {
+                webSocketRef.current.close();
+            }
+        };
     }, []);
 
     // Start audio recording and streaming to ESP32
@@ -62,8 +115,8 @@ export default function FetchingHome() {
                 if (event.data.size > 0) {
                     audioChunksRef.current.push(event.data);
                     
-                    // Send the audio chunk to ESP32
-                    sendAudioChunkToESP32(event.data);
+                    // Send the audio chunk to ESP32 via WebSocket
+                    sendAudioViaWebSocket(event.data);
                 }
             };
             
@@ -94,26 +147,23 @@ export default function FetchingHome() {
         }
     };
     
-    // Send audio chunk to ESP32
-    const sendAudioChunkToESP32 = async (audioChunk) => {
+    // Send audio chunk to ESP32 via WebSocket
+    const sendAudioViaWebSocket = async (audioChunk) => {
+        if (!webSocketRef.current || webSocketRef.current.readyState !== WebSocket.OPEN) {
+            console.error('WebSocket not connected');
+            return;
+        }
+        
         try {
             const reader = new FileReader();
             reader.readAsArrayBuffer(audioChunk);
             
-            reader.onloadend = async () => {
+            reader.onloadend = () => {
                 const arrayBuffer = reader.result;
-                
-                // Send the audio data to ESP32
-                await fetch(AUDIO_ENDPOINT, {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'audio/webm',
-                    },
-                    body: arrayBuffer
-                });
+                webSocketRef.current.send(arrayBuffer);
             };
         } catch (error) {
-            console.error('Error sending audio to ESP32:', error);
+            console.error('Error sending audio via WebSocket:', error);
         }
     };
 
@@ -122,7 +172,20 @@ export default function FetchingHome() {
             stopAudioStreaming();
         } else {
             try {
-                // Send fetch command first
+                // Check WebSocket connection before starting
+                if (!webSocketRef.current || webSocketRef.current.readyState !== WebSocket.OPEN) {
+                    setEsp32Status('WebSocket not connected. Trying to reconnect...');
+                    initWebSocket();
+                    // Give some time for the connection to establish
+                    await new Promise(resolve => setTimeout(resolve, 1000));
+                    
+                    if (!webSocketRef.current || webSocketRef.current.readyState !== WebSocket.OPEN) {
+                        setEsp32Status('Failed to connect WebSocket. Please try again.');
+                        return;
+                    }
+                }
+                
+                // Notify backend
                 setEsp32Status('Sending fetch command...');
                 const res = await fetch(`${API_BASE_URL}/fetch`, {
                     method: 'POST',
@@ -134,8 +197,6 @@ export default function FetchingHome() {
                 // Start audio streaming
                 await startAudioStreaming();
                 
-                // Check status again after a short delay
-                setTimeout(checkEsp32Status, 3000);
             } catch (error) {
                 console.error('Error:', error);
                 setEsp32Status('Error sending command or starting audio');
@@ -147,6 +208,13 @@ export default function FetchingHome() {
     const refreshStatus = () => {
         setEsp32Status('Refreshing status...');
         checkEsp32Status();
+        
+        // Also try to reconnect WebSocket if needed
+        if (!webSocketRef.current || 
+            webSocketRef.current.readyState === WebSocket.CLOSED || 
+            webSocketRef.current.readyState === WebSocket.CLOSING) {
+            initWebSocket();
+        }
     };
 
     // Modal control functions
@@ -176,6 +244,9 @@ export default function FetchingHome() {
         return () => {
             if (isRecording && mediaRecorderRef.current) {
                 mediaRecorderRef.current.stop();
+            }
+            if (webSocketRef.current) {
+                webSocketRef.current.close();
             }
         };
     }, []);
