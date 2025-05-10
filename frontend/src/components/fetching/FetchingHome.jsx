@@ -7,6 +7,9 @@ export default function FetchingHome() {
   const [isFeatureOpen, setIsFeatureOpen] = useState(false);
   const [ledOn, setLedOn] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
+  const [micActive, setMicActive] = useState(false);
+  const [micStream, setMicStream] = useState(null);
+  const [micLoading, setMicLoading] = useState(false);
 
   const API_BASE_URL = 'https://testdockerbackend.azurewebsites.net/api/fetching';
 
@@ -32,10 +35,46 @@ export default function FetchingHome() {
     }
   };
 
+  const toggleMicrophone = async () => {
+    setMicLoading(true);
+    
+    try {
+      if (!micActive) {
+        // Request microphone access
+        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        setMicStream(stream);
+        setMicActive(true);
+        console.log('Microphone access granted');
+      } else {
+        // Stop microphone access
+        if (micStream) {
+          micStream.getTracks().forEach(track => track.stop());
+          setMicStream(null);
+        }
+        setMicActive(false);
+        console.log('Microphone turned off');
+      }
+    } catch (err) {
+      console.error('Error accessing microphone:', err);
+      alert(`Could not access microphone: ${err.message}`);
+    } finally {
+      setMicLoading(false);
+    }
+  };
+
   // Show overview modal on mount
   useEffect(() => {
     openModal();
   }, []);
+
+  // Clean up microphone stream when component unmounts
+  useEffect(() => {
+    return () => {
+      if (micStream) {
+        micStream.getTracks().forEach(track => track.stop());
+      }
+    };
+  }, [micStream]);
 
   const openModal = () => {
     setIsOverviewOpen(true);
@@ -86,17 +125,31 @@ export default function FetchingHome() {
       ></iframe>
 
       <div className="flex flex-col items-center gap-4 w-full max-w-md">
-        {/* Status indicator */}
-        <div
-          className={`text-center py-2 px-4 rounded-lg ${
-            ledOn
-              ? 'bg-green-100 text-green-800'
-              : 'bg-red-100 text-red-800'
-          }`}
-        >
-          <p className="font-medium">
-            LED is {ledOn ? 'ON' : 'OFF'}
-          </p>
+        {/* Status indicators */}
+        <div className="flex gap-2 w-full justify-center">
+          <div
+            className={`text-center py-2 px-4 rounded-lg ${
+              ledOn
+                ? 'bg-green-100 text-green-800'
+                : 'bg-red-100 text-red-800'
+            }`}
+          >
+            <p className="font-medium">
+              LED is {ledOn ? 'ON' : 'OFF'}
+            </p>
+          </div>
+
+          <div
+            className={`text-center py-2 px-4 rounded-lg ${
+              micActive
+                ? 'bg-green-100 text-green-800'
+                : 'bg-red-100 text-red-800'
+            }`}
+          >
+            <p className="font-medium">
+              Mic is {micActive ? 'ON' : 'OFF'}
+            </p>
+          </div>
         </div>
 
         {/* Control Buttons */}
@@ -117,6 +170,25 @@ export default function FetchingHome() {
               : ledOn
               ? 'TURN OFF'
               : 'TURN ON'}
+          </button>
+        </div>
+        <div className="flex flex-col gap-3 w-full">
+          <button
+            className={`text-md font-lg text-white rounded-full px-6 py-3 transition duration-300 disabled:opacity-50 disabled:cursor-not-allowed ${
+              micLoading
+                ? 'bg-gray-400'
+                : micActive
+                ? 'bg-red-600 hover:bg-red-700'
+                : 'bg-blue-600 hover:bg-blue-700'
+            }`}
+            onClick={toggleMicrophone}
+            disabled={micLoading}
+          >
+            {micLoading
+              ? 'Processing...'
+              : micActive
+              ? 'CLOSE MIC'
+              : 'OPEN MIC'}
           </button>
         </div>
       </div>

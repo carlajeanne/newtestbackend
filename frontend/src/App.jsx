@@ -50,18 +50,18 @@ function App() {
         <div className='font-montserrat'>
             <Router>
                 <Routes>
-                    <Route path="/" element={isAuthenticated ? <Navigate to="/fetching-page" /> : <LandingPage />} />
-                    <Route path="/forgot-password" element={isAuthenticated ? <Navigate to="/fetching-page" /> : <ForgotPassword />} />
-                    <Route path="/reset-password" element={isAuthenticated ? <Navigate to="/fetching-page" /> : <ResetPassword />} />
+                  <Route path="/" element={isAuthenticated ? <Navigate to="/fetching-page" /> : <LandingPage />} />
+                  <Route path="/forgot-password" element={isAuthenticated ? <Navigate to="/fetching-page" /> : <ForgotPassword />} />
+                  <Route path="/reset-password" element={isAuthenticated ? <Navigate to="/fetching-page" /> : <ResetPassword />} />
 
 
-                <Route element={<ProtectedRoute />}>
-                    <Route path="/fetching-page" element={<FetchingPage />} />
-                    <Route path="/petcam-page" element={<PetcamPage />} />
-                    <Route path="/gallery-page" element={<GalleryPage />} />
-                    <Route path="/account" element={<UserPage />} />
-                    <Route path="/dashboard-page" element={<DashboardPage />} />
-                </Route>
+                  <Route element={<ProtectedRoute />}>
+                      <Route path="/fetching-page" element={<FetchingPage />} />
+                      <Route path="/petcam-page" element={<PetcamPage />} />
+                      <Route path="/gallery-page" element={<GalleryPage />} />
+                      <Route path="/account" element={<UserPage />} />
+                      <Route path="/dashboard-page" element={<DashboardPage />} />
+                  </Route>
                 </Routes>
             </Router>
         </div>
