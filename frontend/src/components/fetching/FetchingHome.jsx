@@ -1,6 +1,8 @@
 import React, { useState, useEffect, useRef } from 'react';
 
 export default function AudioStreaming() {
+  const [isOverviewOpen, setIsOverviewOpen] = useState(false);
+  const [isFeatureOpen, setIsFeatureOpen] = useState(false);
   const [micActive, setMicActive] = useState(false);
   const [micStream, setMicStream] = useState(null);
   const [micLoading, setMicLoading] = useState(false);
