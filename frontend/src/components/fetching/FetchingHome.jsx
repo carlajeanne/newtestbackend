@@ -1,27 +1,15 @@
 import React, { useState, useEffect, useRef } from 'react';
-import FetchingOverviewModal from './FetchingOverview';
-import FetchingFeature from './FetchingFeature';
 
-export default function FetchingHome() {
-  const [isOverviewOpen, setIsOverviewOpen] = useState(false);
-  const [isFeatureOpen, setIsFeatureOpen] = useState(false);
-  const [ledOn, setLedOn] = useState(false);
-  const [isLoading, setIsLoading] = useState(false);
+export default function AudioStreaming() {
   const [micActive, setMicActive] = useState(false);
   const [micStream, setMicStream] = useState(null);
   const [micLoading, setMicLoading] = useState(false);
   const [audioEnabled, setAudioEnabled] = useState(false);
   const [audioLoading, setAudioLoading] = useState(false);
-  
-  // Video configuration
-  const video = {
-    url: "https://www.youtube.com/embed/dQw4w9WgXcQ", // Replace with your actual video URL
-    title: "Fetching Demo" // Replace with your actual video title
-  };
-  
+  const [statusMessage, setStatusMessage] = useState('');
+
   // References for audio processing
   const audioContextRef = useRef(null);
-  const mediaRecorderRef = useRef(null);
   const processorNodeRef = useRef(null);
   const audioIntervalRef = useRef(null);
   const audioChunksRef = useRef([]);
@@ -59,40 +47,41 @@ export default function FetchingHome() {
         const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
         setMicStream(stream);
         setMicActive(true);
-        console.log('Microphone access granted');
+        setStatusMessage('Microphone connected successfully');
         
-        // If speaker is already enabled, enable it on the device 
-        // and initialize audio processing
-        if (audioEnabled) {
-          await enableDeviceAudio();
-          initAudioProcessing(stream);
-        }
+        // Automatically enable audio on the ESP32 when mic is enabled
+        await enableDeviceAudio();
+        setAudioEnabled(true);
+        
+        // Initialize audio processing to stream mic data to ESP32
+        initAudioProcessing(stream);
       } else {
         // Stop microphone access and audio processing
         stopAudioProcessing();
         
-        // Disable audio on device if it was enabled
-        if (audioEnabled) {
-          await disableDeviceAudio();
-          setAudioEnabled(false);
-        }
+        // Disable audio on device
+        await disableDeviceAudio();
+        setAudioEnabled(false);
         
+        // Stop microphone stream
         if (micStream) {
           micStream.getTracks().forEach(track => track.stop());
           setMicStream(null);
         }
+        
         setMicActive(false);
-        console.log('Microphone turned off');
+        setStatusMessage('Microphone disconnected');
       }
     } catch (err) {
       console.error('Error accessing microphone:', err);
-      alert(`Could not access microphone: ${err.message}`);
+      setStatusMessage(`Error: ${err.message}`);
     } finally {
       setMicLoading(false);
     }
   };
   
   const enableDeviceAudio = async () => {
+    setAudioLoading(true);
     try {
       const res = await fetch(`${API_BASE_URL}/audio/enable`);
       
@@ -102,15 +91,19 @@ export default function FetchingHome() {
       
       const data = await res.json();
       console.log('Speaker Enable Response:', data);
+      setStatusMessage('Speaker enabled on ESP32');
       return true;
     } catch (err) {
       console.error('Error enabling speaker:', err);
-      alert(`Could not enable speaker: ${err.message}`);
+      setStatusMessage(`Error enabling speaker: ${err.message}`);
       return false;
+    } finally {
+      setAudioLoading(false);
     }
   };
   
   const disableDeviceAudio = async () => {
+    setAudioLoading(true);
     try {
       const res = await fetch(`${API_BASE_URL}/audio/disable`);
       
@@ -120,14 +113,17 @@ export default function FetchingHome() {
       
       const data = await res.json();
       console.log('Speaker Disable Response:', data);
+      setStatusMessage('Speaker disabled on ESP32');
       return true;
     } catch (err) {
       console.error('Error disabling speaker:', err);
-      alert(`Could not disable speaker: ${err.message}`);
+      setStatusMessage(`Error disabling speaker: ${err.message}`);
       return false;
+    } finally {
+      setAudioLoading(false);
     }
   };
-  
+
   const toggleSpeaker = async () => {
     setAudioLoading(true);
     
@@ -175,8 +171,8 @@ export default function FetchingHome() {
       });
       audioContextRef.current = audioContext;
       
-      // Create a processor node with appropriate buffer size
-      const bufferSize = 2048; // Smaller buffer for lower latency
+      // Create a processor node with appropriate buffer size for low latency
+      const bufferSize = 2048;
       let processorNode;
       
       if (audioContext.createScriptProcessor) {
@@ -204,18 +200,18 @@ export default function FetchingHome() {
         source.connect(processorNode);
         processorNode.connect(audioContext.destination);
         
-        // Set up regular interval to send audio chunks
-        // More frequent sends for lower latency
-        audioIntervalRef.current = setInterval(sendAudioChunks, 50); // 50ms intervals
+        // Set up regular interval to send audio chunks (50ms for low latency)
+        audioIntervalRef.current = setInterval(sendAudioChunks, 50);
         
-        console.log('Audio processing initialized with ScriptProcessorNode');
+        console.log('Audio processing initialized');
+        setStatusMessage('Audio streaming active');
       } else {
         console.error('ScriptProcessorNode is not supported in this browser');
-        alert('Your browser does not support the required audio processing features.');
+        setStatusMessage('Your browser does not support the required audio features');
       }
     } catch (err) {
       console.error('Error setting up audio processing:', err);
-      alert(`Could not set up audio processing: ${err.message}`);
+      setStatusMessage(`Audio processing error: ${err.message}`);
     }
   };
   
@@ -249,7 +245,7 @@ export default function FetchingHome() {
     
     console.log('Audio processing stopped');
   };
-  
+
   const sendAudioChunks = async () => {
     if (!audioEnabled || audioChunksRef.current.length === 0) return;
     
@@ -259,7 +255,6 @@ export default function FetchingHome() {
       audioChunksRef.current = [];
       
       // Combine all chunks into a single blob
-      // Use Uint8Array for better compatibility with binary data
       const concatenated = new Uint8Array(
         chunksToSend.reduce((acc, chunk) => acc + chunk.byteLength, 0)
       );
@@ -283,7 +278,7 @@ export default function FetchingHome() {
       }
     } catch (err) {
       console.error('Error sending audio chunks:', err);
-      // Don't alert here to avoid flooding the user with alerts
+      // Don't update status message on every failed chunk to avoid spamming UI
     }
   };
 
@@ -367,16 +362,14 @@ export default function FetchingHome() {
             </p>
           </div>
 
-          <div
-            className={`text-center py-2 px-4 rounded-lg ${
-              micActive
-                ? 'bg-green-100 text-green-800'
-                : 'bg-red-100 text-red-800'
+          <div 
+            className={`px-4 py-2 rounded-md ${
+              micActive 
+              ? 'bg-green-100 text-green-800' 
+              : 'bg-red-100 text-red-800'
             }`}
           >
-            <p className="font-medium">
-              Mic is {micActive ? 'ON' : 'OFF'}
-            </p>
+            Microphone: {micActive ? 'ON' : 'OFF'}
           </div>
           
           <div
@@ -391,6 +384,12 @@ export default function FetchingHome() {
             </p>
           </div>
         </div>
+        
+        {statusMessage && (
+          <div className="mt-2 p-2 bg-blue-50 text-blue-800 rounded-md">
+            {statusMessage}
+          </div>
+        )}
 
         {/* Control Buttons */}
         <div className="flex flex-col gap-3 w-full">
@@ -414,42 +413,21 @@ export default function FetchingHome() {
         </div>
         <div className="flex flex-col gap-3 w-full">
           <button
-            className={`text-md font-lg text-white rounded-full px-6 py-3 transition duration-300 disabled:opacity-50 disabled:cursor-not-allowed ${
-              micLoading
-                ? 'bg-gray-400'
-                : micActive
-                ? 'bg-red-600 hover:bg-red-700'
-                : 'bg-blue-600 hover:bg-blue-700'
+            className={`w-full py-3 px-6 text-white font-semibold rounded-md shadow-md transition-all ${
+              micLoading ? 'bg-gray-400 cursor-not-allowed' : 
+              micActive ? 'bg-red-600 hover:bg-red-700' : 'bg-blue-600 hover:bg-blue-700'
             }`}
             onClick={toggleMicrophone}
             disabled={micLoading}
           >
-            {micLoading
-              ? 'Processing...'
-              : micActive
-              ? 'CLOSE MIC'
-              : 'OPEN MIC'}
+            {micLoading ? 'Processing...' : micActive ? 'STOP MICROPHONE' : 'START MICROPHONE'}
           </button>
         </div>
-        <div className="flex flex-col gap-3 w-full">
-          <button
-            className={`text-md font-lg text-white rounded-full px-6 py-3 transition duration-300 disabled:opacity-50 disabled:cursor-not-allowed ${
-              audioLoading
-                ? 'bg-gray-400'
-                : audioEnabled
-                ? 'bg-red-600 hover:bg-red-700'
-                : 'bg-green-600 hover:bg-green-700'
-            }`}
-            onClick={toggleSpeaker}
-            disabled={audioLoading || !micActive}
-          >
-            {audioLoading
-              ? 'Processing...'
-              : audioEnabled
-              ? 'DISABLE SPEAKER'
-              : 'ENABLE SPEAKER'}
-          </button>
-        </div>
+
+        <p className="mt-4 text-sm text-gray-600">
+          When you enable the microphone, audio will automatically be streamed to the ESP32 speaker.
+        </p>
+
       </div>
     </div>
   );
