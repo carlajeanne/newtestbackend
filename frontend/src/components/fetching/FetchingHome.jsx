@@ -61,13 +61,21 @@ export default function FetchingHome() {
         setMicActive(true);
         console.log('Microphone access granted');
         
-        // Initialize audio processing if speaker is enabled
+        // If speaker is already enabled, enable it on the device 
+        // and initialize audio processing
         if (audioEnabled) {
+          await enableDeviceAudio();
           initAudioProcessing(stream);
         }
       } else {
         // Stop microphone access and audio processing
         stopAudioProcessing();
+        
+        // Disable audio on device if it was enabled
+        if (audioEnabled) {
+          await disableDeviceAudio();
+          setAudioEnabled(false);
+        }
         
         if (micStream) {
           micStream.getTracks().forEach(track => track.stop());
@@ -84,31 +92,67 @@ export default function FetchingHome() {
     }
   };
   
-  const toggleSpeaker = async () => {
-    setAudioLoading(true);
-    
+  const enableDeviceAudio = async () => {
     try {
-      const endpoint = !audioEnabled ? 'audio/enable' : 'audio/disable';
-      const res = await fetch(`${API_BASE_URL}/${endpoint}`);
+      const res = await fetch(`${API_BASE_URL}/audio/enable`);
       
       if (!res.ok) {
         throw new Error(`HTTP error! Status: ${res.status}`);
       }
       
       const data = await res.json();
-      console.log('Speaker Response:', data);
+      console.log('Speaker Enable Response:', data);
+      return true;
+    } catch (err) {
+      console.error('Error enabling speaker:', err);
+      alert(`Could not enable speaker: ${err.message}`);
+      return false;
+    }
+  };
+  
+  const disableDeviceAudio = async () => {
+    try {
+      const res = await fetch(`${API_BASE_URL}/audio/disable`);
       
+      if (!res.ok) {
+        throw new Error(`HTTP error! Status: ${res.status}`);
+      }
+      
+      const data = await res.json();
+      console.log('Speaker Disable Response:', data);
+      return true;
+    } catch (err) {
+      console.error('Error disabling speaker:', err);
+      alert(`Could not disable speaker: ${err.message}`);
+      return false;
+    }
+  };
+  
+  const toggleSpeaker = async () => {
+    setAudioLoading(true);
+    
+    try {
       const newAudioEnabledState = !audioEnabled;
-      setAudioEnabled(newAudioEnabledState);
       
-      // If mic is active and we're enabling audio, start processing
-      if (micActive && newAudioEnabledState) {
-        initAudioProcessing(micStream);
-      } 
-      // If we're disabling audio, stop processing
-      else if (!newAudioEnabledState) {
+      if (newAudioEnabledState) {
+        // Enable audio on device
+        const success = await enableDeviceAudio();
+        if (!success) throw new Error("Failed to enable audio on device");
+        
+        // If mic is already active, start processing
+        if (micActive && micStream) {
+          initAudioProcessing(micStream);
+        }
+      } else {
+        // Disable audio on device
+        const success = await disableDeviceAudio();
+        if (!success) throw new Error("Failed to disable audio on device");
+        
+        // Stop audio processing
         stopAudioProcessing();
       }
+      
+      setAudioEnabled(newAudioEnabledState);
       
     } catch (err) {
       console.error('Error toggling speaker:', err);
@@ -122,49 +166,56 @@ export default function FetchingHome() {
     if (!stream) return;
     
     try {
-      // Create audio context and connect microphone
-      const audioContext = new (window.AudioContext || window.webkitAudioContext)();
-      const source = audioContext.createMediaStreamSource(stream);
+      // Stop any existing audio processing
+      stopAudioProcessing();
       
-      // Create a processor node for audio processing
-      const bufferSize = 4096;
+      // Create audio context and connect microphone
+      const audioContext = new (window.AudioContext || window.webkitAudioContext)({
+        sampleRate: 44100 // Match ESP32 I2S configuration
+      });
+      audioContextRef.current = audioContext;
+      
+      // Create a processor node with appropriate buffer size
+      const bufferSize = 2048; // Smaller buffer for lower latency
       let processorNode;
       
       if (audioContext.createScriptProcessor) {
         processorNode = audioContext.createScriptProcessor(bufferSize, 1, 1);
+        processorNodeRef.current = processorNode;
+        
+        // Set up the audio processing callback
+        processorNode.onaudioprocess = (e) => {
+          if (!audioEnabled) return;
+          
+          const inputBuffer = e.inputBuffer.getChannelData(0);
+          
+          // Convert float32 to Int16 for more efficient transmission
+          const pcmData = new Int16Array(inputBuffer.length);
+          for (let i = 0; i < inputBuffer.length; i++) {
+            pcmData[i] = Math.max(-32768, Math.min(32767, inputBuffer[i] * 32767));
+          }
+          
+          // Add to chunks for sending
+          audioChunksRef.current.push(pcmData.buffer);
+        };
+        
+        // Connect the microphone to the processor
+        const source = audioContext.createMediaStreamSource(stream);
+        source.connect(processorNode);
+        processorNode.connect(audioContext.destination);
+        
+        // Set up regular interval to send audio chunks
+        // More frequent sends for lower latency
+        audioIntervalRef.current = setInterval(sendAudioChunks, 50); // 50ms intervals
+        
+        console.log('Audio processing initialized with ScriptProcessorNode');
       } else {
         console.error('ScriptProcessorNode is not supported in this browser');
-        return;
+        alert('Your browser does not support the required audio processing features.');
       }
-      
-      // Set up the audio processing callback
-      processorNode.onaudioprocess = (e) => {
-        const inputBuffer = e.inputBuffer.getChannelData(0);
-        
-        // Convert float32 to Int16 for more efficient transmission
-        const pcmData = new Int16Array(inputBuffer.length);
-        for (let i = 0; i < inputBuffer.length; i++) {
-          pcmData[i] = inputBuffer[i] * 0x7FFF;
-        }
-        
-        // Add to chunks for sending
-        audioChunksRef.current.push(pcmData.buffer);
-      };
-      
-      // Connect everything
-      source.connect(processorNode);
-      processorNode.connect(audioContext.destination);
-      
-      // Store references
-      audioContextRef.current = audioContext;
-      processorNodeRef.current = processorNode;
-      
-      // Set up an interval to send audio chunks to the server
-      audioIntervalRef.current = setInterval(sendAudioChunks, 100); // Send every 100ms
-      
-      console.log('Audio processing initialized');
     } catch (err) {
       console.error('Error setting up audio processing:', err);
+      alert(`Could not set up audio processing: ${err.message}`);
     }
   };
   
@@ -184,7 +235,11 @@ export default function FetchingHome() {
     // Close audio context
     if (audioContextRef.current) {
       if (audioContextRef.current.state !== 'closed') {
-        audioContextRef.current.close();
+        try {
+          audioContextRef.current.close();
+        } catch (err) {
+          console.warn('Error closing audio context:', err);
+        }
       }
       audioContextRef.current = null;
     }
@@ -196,11 +251,26 @@ export default function FetchingHome() {
   };
   
   const sendAudioChunks = async () => {
-    if (audioChunksRef.current.length === 0) return;
+    if (!audioEnabled || audioChunksRef.current.length === 0) return;
     
     try {
+      // Create a copy of the current chunks and clear the original array
+      const chunksToSend = [...audioChunksRef.current];
+      audioChunksRef.current = [];
+      
       // Combine all chunks into a single blob
-      const blob = new Blob([new Uint8Array(audioChunksRef.current.flat())], { type: 'audio/raw' });
+      // Use Uint8Array for better compatibility with binary data
+      const concatenated = new Uint8Array(
+        chunksToSend.reduce((acc, chunk) => acc + chunk.byteLength, 0)
+      );
+      
+      let offset = 0;
+      chunksToSend.forEach(chunk => {
+        concatenated.set(new Uint8Array(chunk), offset);
+        offset += chunk.byteLength;
+      });
+      
+      const blob = new Blob([concatenated], { type: 'audio/raw' });
       
       // Send to server
       const response = await fetch(`${API_BASE_URL}/audio/stream`, {
@@ -211,11 +281,9 @@ export default function FetchingHome() {
       if (!response.ok) {
         throw new Error(`HTTP error! Status: ${response.status}`);
       }
-      
-      // Clear chunks after sending
-      audioChunksRef.current = [];
     } catch (err) {
       console.error('Error sending audio chunks:', err);
+      // Don't alert here to avoid flooding the user with alerts
     }
   };
 
@@ -230,12 +298,19 @@ export default function FetchingHome() {
       // Stop audio processing
       stopAudioProcessing();
       
+      // Disable audio on device
+      if (audioEnabled) {
+        disableDeviceAudio().catch(err => {
+          console.error('Error disabling audio on unmount:', err);
+        });
+      }
+      
       // Stop microphone stream
       if (micStream) {
         micStream.getTracks().forEach(track => track.stop());
       }
     };
-  }, [micStream]);
+  }, [micStream, audioEnabled]);
 
   const openModal = () => {
     setIsOverviewOpen(true);
