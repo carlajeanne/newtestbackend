@@ -13,6 +13,12 @@ export default function FetchingHome() {
   const [audioEnabled, setAudioEnabled] = useState(false);
   const [audioLoading, setAudioLoading] = useState(false);
   
+  // Video configuration
+  const video = {
+    url: "https://www.youtube.com/embed/dQw4w9WgXcQ", // Replace with your actual video URL
+    title: "Fetching Demo" // Replace with your actual video title
+  };
+  
   // References for audio processing
   const audioContextRef = useRef(null);
   const mediaRecorderRef = useRef(null);
@@ -297,6 +303,18 @@ export default function FetchingHome() {
               Mic is {micActive ? 'ON' : 'OFF'}
             </p>
           </div>
+          
+          <div
+            className={`text-center py-2 px-4 rounded-lg ${
+              audioEnabled
+                ? 'bg-green-100 text-green-800'
+                : 'bg-red-100 text-red-800'
+            }`}
+          >
+            <p className="font-medium">
+              Speaker is {audioEnabled ? 'ON' : 'OFF'}
+            </p>
+          </div>
         </div>
 
         {/* Control Buttons */}
@@ -336,6 +354,25 @@ export default function FetchingHome() {
               : micActive
               ? 'CLOSE MIC'
               : 'OPEN MIC'}
+          </button>
+        </div>
+        <div className="flex flex-col gap-3 w-full">
+          <button
+            className={`text-md font-lg text-white rounded-full px-6 py-3 transition duration-300 disabled:opacity-50 disabled:cursor-not-allowed ${
+              audioLoading
+                ? 'bg-gray-400'
+                : audioEnabled
+                ? 'bg-red-600 hover:bg-red-700'
+                : 'bg-green-600 hover:bg-green-700'
+            }`}
+            onClick={toggleSpeaker}
+            disabled={audioLoading || !micActive}
+          >
+            {audioLoading
+              ? 'Processing...'
+              : audioEnabled
+              ? 'DISABLE SPEAKER'
+              : 'ENABLE SPEAKER'}
           </button>
         </div>
       </div>
