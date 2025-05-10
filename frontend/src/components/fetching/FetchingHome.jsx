@@ -16,6 +16,13 @@ export default function AudioStreaming() {
   const audioIntervalRef = useRef(null);
   const audioChunksRef = useRef([]);
 
+    const video = {
+    url: "https://www.youtube.com/embed/dQw4w9WgXcQ", // Replace with your actual video URL
+    title: "Fetching Demo" // Replace with your actual video title
+  };
+  const [ledOn, setLedOn] = useState(false);
+  const [isLoading, setIsLoading] = useState(false);
+
   const API_BASE_URL = 'https://testdockerbackend.azurewebsites.net/api/fetching';
 
   const toggleLED = async () => {
