@@ -11,21 +11,51 @@ export default function AudioStreaming() {
   const [audioEnabled, setAudioEnabled] = useState(false);
   const [audioLoading, setAudioLoading] = useState(false);
   const [statusMessage, setStatusMessage] = useState('');
+  const [deviceStatus, setDeviceStatus] = useState(null);
+  const [lastAudioSent, setLastAudioSent] = useState(0);
 
   // References for audio processing
   const audioContextRef = useRef(null);
   const processorNodeRef = useRef(null);
   const audioIntervalRef = useRef(null);
   const audioChunksRef = useRef([]);
+  const statusCheckIntervalRef = useRef(null);
 
-    const video = {
-    url: "https://www.youtube.com/embed/dQw4w9WgXcQ", // Replace with your actual video URL
-    title: "Fetching Demo" // Replace with your actual video title
+  const video = {
+    url: "https://www.youtube.com/embed/dQw4w9WgXcQ",
+    title: "Fetching Demo"
   };
   const [ledOn, setLedOn] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
 
   const API_BASE_URL = 'https://testdockerbackend.azurewebsites.net/api/fetching';
+
+  // Function to check device status
+  const checkDeviceStatus = async () => {
+    try {
+      const res = await fetch(`${API_BASE_URL}/check-device-status`);
+      
+      if (!res.ok) {
+        throw new Error(`HTTP error! Status: ${res.status}`);
+      }
+      
+      const data = await res.json();
+      setDeviceStatus(data);
+      
+      // Update status message with more detailed information
+      if (data.connectionState === 'Connected') {
+        setStatusMessage(`ESP32 connected. Audio packets received: ${data.audioPacketsReceived}. Last audio: ${data.timeSinceLastAudio}ms ago.`);
+      } else {
+        setStatusMessage(`ESP32 ${data.connectionState}. Check device connection.`);
+      }
+      
+      return data;
+    } catch (err) {
+      console.error('Error checking device status:', err);
+      setStatusMessage(`Error getting device status: ${err.message}`);
+      return null;
+    }
+  };
 
   const toggleLED = async () => {
     const state = ledOn ? 'off' : 'on';
@@ -55,7 +85,14 @@ export default function AudioStreaming() {
     try {
       if (!micActive) {
         // Request microphone access
-        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        const stream = await navigator.mediaDevices.getUserMedia({ 
+          audio: {
+            echoCancellation: true,
+            noiseSuppression: true,
+            autoGainControl: true
+          } 
+        });
+        
         setMicStream(stream);
         setMicActive(true);
         setStatusMessage('Microphone connected successfully');
@@ -63,6 +100,9 @@ export default function AudioStreaming() {
         // Automatically enable audio on the ESP32 when mic is enabled
         await enableDeviceAudio();
         setAudioEnabled(true);
+        
+        // Start polling for device status to see if audio is reaching the ESP32
+        startStatusPolling();
         
         // Initialize audio processing to stream mic data to ESP32
         initAudioProcessing(stream);
@@ -73,6 +113,9 @@ export default function AudioStreaming() {
         // Disable audio on device
         await disableDeviceAudio();
         setAudioEnabled(false);
+        
+        // Stop status polling
+        stopStatusPolling();
         
         // Stop microphone stream
         if (micStream) {
@@ -103,6 +146,14 @@ export default function AudioStreaming() {
       const data = await res.json();
       console.log('Speaker Enable Response:', data);
       setStatusMessage('Speaker enabled on ESP32');
+      
+      // Also enable passthrough mode if applicable
+      try {
+        await fetch(`${API_BASE_URL}/audio/passthrough/enable`);
+      } catch (passthroughErr) {
+        console.warn('Non-critical: Could not enable passthrough mode', passthroughErr);
+      }
+      
       return true;
     } catch (err) {
       console.error('Error enabling speaker:', err);
@@ -132,6 +183,26 @@ export default function AudioStreaming() {
       return false;
     } finally {
       setAudioLoading(false);
+    }
+  };
+
+  const startStatusPolling = () => {
+    // Clear any existing interval
+    if (statusCheckIntervalRef.current) {
+      clearInterval(statusCheckIntervalRef.current);
+    }
+    
+    // Check status immediately
+    checkDeviceStatus();
+    
+    // Set up polling every 3 seconds
+    statusCheckIntervalRef.current = setInterval(checkDeviceStatus, 3000);
+  };
+  
+  const stopStatusPolling = () => {
+    if (statusCheckIntervalRef.current) {
+      clearInterval(statusCheckIntervalRef.current);
+      statusCheckIntervalRef.current = null;
     }
   };
 
@@ -178,12 +249,12 @@ export default function AudioStreaming() {
       
       // Create audio context and connect microphone
       const audioContext = new (window.AudioContext || window.webkitAudioContext)({
-        sampleRate: 44100 // Match ESP32 I2S configuration
+        sampleRate: 16000 // Lower to 16kHz for ESP32 compatibility
       });
       audioContextRef.current = audioContext;
       
       // Create a processor node with appropriate buffer size for low latency
-      const bufferSize = 2048;
+      const bufferSize = 1024; // Small buffer for less latency
       let processorNode;
       
       if (audioContext.createScriptProcessor) {
@@ -266,9 +337,8 @@ export default function AudioStreaming() {
       audioChunksRef.current = [];
       
       // Combine all chunks into a single blob
-      const concatenated = new Uint8Array(
-        chunksToSend.reduce((acc, chunk) => acc + chunk.byteLength, 0)
-      );
+      const totalSize = chunksToSend.reduce((acc, chunk) => acc + chunk.byteLength, 0);
+      const concatenated = new Uint8Array(totalSize);
       
       let offset = 0;
       chunksToSend.forEach(chunk => {
@@ -287,6 +357,10 @@ export default function AudioStreaming() {
       if (!response.ok) {
         throw new Error(`HTTP error! Status: ${response.status}`);
       }
+      
+      // Update last audio sent timestamp
+      setLastAudioSent(Date.now());
+      
     } catch (err) {
       console.error('Error sending audio chunks:', err);
       // Don't update status message on every failed chunk to avoid spamming UI
@@ -296,11 +370,17 @@ export default function AudioStreaming() {
   // Show overview modal on mount
   useEffect(() => {
     openModal();
+    
+    // Initial device status check
+    checkDeviceStatus();
   }, []);
 
   // Clean up resources when component unmounts
   useEffect(() => {
     return () => {
+      // Stop polling
+      stopStatusPolling();
+      
       // Stop audio processing
       stopAudioProcessing();
       
@@ -334,6 +414,26 @@ export default function AudioStreaming() {
 
   const closeFeatureModal = () => {
     setIsFeatureOpen(false);
+  };
+
+  // Format status display with device info
+  const getDetailedStatus = () => {
+    if (!deviceStatus) return statusMessage;
+    
+    if (deviceStatus.connectionState === 'Connected') {
+      const timeSinceAudio = deviceStatus.timeSinceLastAudio || 0;
+      const packetsReceived = deviceStatus.audioPacketsReceived || 0;
+      
+      if (timeSinceAudio > 10000 && micActive) {
+        return `Warning: ESP32 not receiving audio (${timeSinceAudio/1000}s since last packet)`;
+      } else if (packetsReceived > 0) {
+        return `ESP32 connected. Audio flowing (${packetsReceived} packets received)`;
+      } else {
+        return `ESP32 ready. Waiting for audio data.`;
+      }
+    } else {
+      return `ESP32 ${deviceStatus.connectionState || 'Unknown'}. Check device connection.`;
+    }
   };
 
   return (
@@ -394,6 +494,11 @@ export default function AudioStreaming() {
               Speaker is {audioEnabled ? 'ON' : 'OFF'}
             </p>
           </div>
+        </div>
+        
+        {/* Status message with device info */}
+        <div className="mt-2 p-2 bg-blue-50 text-blue-800 rounded-md w-full text-center">
+          {getDetailedStatus()}
         </div>
         
         {statusMessage && (
