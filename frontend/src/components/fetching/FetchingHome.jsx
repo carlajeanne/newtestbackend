@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import FetchingOverviewModal from './FetchingOverview';
 import FetchingFeature from './FetchingFeature';
 
-export default function AudioStreaming() {
+export default function FetchingPage() {
   const [isOverviewOpen, setIsOverviewOpen] = useState(false);
   const [isFeatureOpen, setIsFeatureOpen] = useState(false);
   const [micActive, setMicActive] = useState(false);
