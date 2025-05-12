@@ -372,7 +372,7 @@ const Dashboard = () => {
         <div className="h-full flex flex-col items-center justify-center bg-very-bright-pastel-orange p-5">
             {/* Logo Section */}
             <div className="flex justify-center mt-20">
-                <img src="/public/logo.png" alt="Logo" className="w-1/4 h-auto sm:w-1/6 md:w-1/8 lg:w-1/10" />
+                <img src="/logo.png" alt="Logo" className="w-1/4 h-auto sm:w-1/6 md:w-1/8 lg:w-1/10" />
             </div>
             
             {/* Custom Legend */}

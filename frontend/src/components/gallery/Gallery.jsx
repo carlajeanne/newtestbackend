@@ -94,7 +94,7 @@ const Gallery = () => {
 
       {/* Logo Section */}
       <div className="flex justify-center mt-20 ">
-        <img src="/public/logo.png" alt="Logo" className="w-25 h-20" />
+        <img src="/logo.png" alt="Logo" className="w-25 h-20" />
       </div>
 
       {/* Error and Loading States */}
