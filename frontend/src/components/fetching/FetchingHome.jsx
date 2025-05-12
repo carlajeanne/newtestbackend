@@ -13,11 +13,12 @@ export default function AudioStreaming() {
   const [statusMessage, setStatusMessage] = useState('');
   const [deviceStatus, setDeviceStatus] = useState(null);
   const [lastAudioSent, setLastAudioSent] = useState(0);
+  const [debugMode, setDebugMode] = useState(false);
 
   // References for audio processing
+  const mediaRecorderRef = useRef(null);
   const audioContextRef = useRef(null);
-  const processorNodeRef = useRef(null);
-  const audioIntervalRef = useRef(null);
+  const streamIntervalRef = useRef(null);
   const audioChunksRef = useRef([]);
   const statusCheckIntervalRef = useRef(null);
 
@@ -29,6 +30,13 @@ export default function AudioStreaming() {
   const [isLoading, setIsLoading] = useState(false);
 
   const API_BASE_URL = 'https://testdockerbackend.azurewebsites.net/api/fetching';
+
+  // Audio recording configuration
+  const audioConfig = {
+    sampleRate: 44100,    // Match ESP32's sample rate (44.1kHz)
+    channelCount: 1,      // Mono audio
+    bitsPerSample: 16     // 16-bit audio
+  };
 
   // Function to check device status
   const checkDeviceStatus = async () => {
@@ -79,110 +87,184 @@ export default function AudioStreaming() {
     }
   };
 
-  const toggleMicrophone = async () => {
-    setMicLoading(true);
-    
+  // Start recording and streaming audio
+  const startAudioStream = async () => {
     try {
-      if (!micActive) {
-        // Request microphone access
-        const stream = await navigator.mediaDevices.getUserMedia({ 
-          audio: {
-            echoCancellation: true,
-            noiseSuppression: true,
-            autoGainControl: true
-          } 
-        });
-        
-        setMicStream(stream);
-        setMicActive(true);
-        setStatusMessage('Microphone connected successfully');
-        
-        // Automatically enable audio on the ESP32 when mic is enabled
-        await enableDeviceAudio();
-        setAudioEnabled(true);
-        
-        // Start polling for device status to see if audio is reaching the ESP32
-        startStatusPolling();
-        
-        // Initialize audio processing to stream mic data to ESP32
-        initAudioProcessing(stream);
-      } else {
-        // Stop microphone access and audio processing
-        stopAudioProcessing();
-        
-        // Disable audio on device
-        await disableDeviceAudio();
-        setAudioEnabled(false);
-        
-        // Stop status polling
-        stopStatusPolling();
-        
-        // Stop microphone stream
-        if (micStream) {
-          micStream.getTracks().forEach(track => track.stop());
-          setMicStream(null);
-        }
-        
-        setMicActive(false);
-        setStatusMessage('Microphone disconnected');
+      console.log("Starting audio recording...");
+      setMicLoading(true);
+      
+      // First, enable audio on the ESP32
+      const enableResponse = await fetch(`${API_BASE_URL}/audio/enable`);
+      const enableResult = await enableResponse.json();
+      console.log("Audio Enable Response:", enableResult);
+      
+      // Also enable passthrough if needed
+      const passthroughResponse = await fetch(`${API_BASE_URL}/audio/passthrough/enable`);
+      const passthroughResult = await passthroughResponse.json();
+      console.log("Passthrough Enable Response:", passthroughResult);
+      
+      // Check device status to confirm
+      const statusData = await checkDeviceStatus();
+      
+      // If audio not enabled despite our request, alert user
+      if (statusData && !statusData.audioEnabled) {
+        console.error("WARNING: Device reports audio is still disabled!");
+        setStatusMessage("Warning: Device reports audio is still disabled!");
       }
-    } catch (err) {
-      console.error('Error accessing microphone:', err);
-      setStatusMessage(`Error: ${err.message}`);
+      
+      // Get audio stream from user's microphone
+      const stream = await navigator.mediaDevices.getUserMedia({ 
+        audio: {
+          echoCancellation: true,
+          noiseSuppression: true,
+          autoGainControl: true,
+          sampleRate: audioConfig.sampleRate,
+          channelCount: audioConfig.channelCount
+        } 
+      });
+      
+      // Set up audio processing
+      audioContextRef.current = new (window.AudioContext || window.webkitAudioContext)({
+        sampleRate: audioConfig.sampleRate
+      });
+      
+      // Create media recorder
+      mediaRecorderRef.current = new MediaRecorder(stream);
+      
+      // Set up audio chunk collection
+      audioChunksRef.current = [];
+      mediaRecorderRef.current.ondataavailable = (event) => {
+        if (event.data.size > 0) {
+          audioChunksRef.current.push(event.data);
+        }
+      };
+      
+      // Start recording
+      mediaRecorderRef.current.start(100); // Collect chunks every 100ms
+      
+      // Store the stream reference
+      setMicStream(stream);
+      setMicActive(true);
+      setAudioEnabled(true);
+      console.log("Audio recording started");
+      setStatusMessage("Audio streaming active");
+      
+      // Set up streaming interval (send chunks every 500ms)
+      streamIntervalRef.current = setInterval(sendAudioChunks, 500);
+      
+      // Start status polling
+      startStatusPolling();
+      
+    } catch (error) {
+      console.error("Error starting audio stream:", error);
+      setStatusMessage(`Error starting audio: ${error.message}`);
     } finally {
       setMicLoading(false);
     }
   };
-  
-  const enableDeviceAudio = async () => {
-    setAudioLoading(true);
+
+  // Stop recording and streaming audio
+  const stopAudioStream = async () => {
+    if (!micActive) return;
+    
+    console.log("Stopping audio recording...");
+    setMicLoading(true);
+    
     try {
-      const res = await fetch(`${API_BASE_URL}/audio/enable`);
-      
-      if (!res.ok) {
-        throw new Error(`HTTP error! Status: ${res.status}`);
+      // Clear streaming interval
+      if (streamIntervalRef.current) {
+        clearInterval(streamIntervalRef.current);
+        streamIntervalRef.current = null;
       }
       
-      const data = await res.json();
-      console.log('Speaker Enable Response:', data);
-      setStatusMessage('Speaker enabled on ESP32');
-      
-      // Also enable passthrough mode if applicable
-      try {
-        await fetch(`${API_BASE_URL}/audio/passthrough/enable`);
-      } catch (passthroughErr) {
-        console.warn('Non-critical: Could not enable passthrough mode', passthroughErr);
+      // Stop media recorder if it exists
+      if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
+        mediaRecorderRef.current.stop();
+        mediaRecorderRef.current = null;
       }
       
-      return true;
-    } catch (err) {
-      console.error('Error enabling speaker:', err);
-      setStatusMessage(`Error enabling speaker: ${err.message}`);
-      return false;
+      // Close audio context
+      if (audioContextRef.current && audioContextRef.current.state !== 'closed') {
+        await audioContextRef.current.close();
+        audioContextRef.current = null;
+      }
+      
+      // Stop microphone stream
+      if (micStream) {
+        micStream.getTracks().forEach(track => track.stop());
+        setMicStream(null);
+      }
+      
+      // Disable audio on ESP32
+      const disableResponse = await fetch(`${API_BASE_URL}/audio/disable`);
+      const disableResult = await disableResponse.json();
+      console.log("Audio Disable Response:", disableResult);
+      
+      // Stop status polling
+      stopStatusPolling();
+      
+      // Reset state
+      setMicActive(false);
+      setAudioEnabled(false);
+      audioChunksRef.current = [];
+      console.log("Audio recording stopped");
+      setStatusMessage("Audio streaming stopped");
+      
+    } catch (error) {
+      console.error("Error stopping audio stream:", error);
+      setStatusMessage(`Error stopping audio: ${error.message}`);
     } finally {
-      setAudioLoading(false);
+      setMicLoading(false);
+    }
+  };
+
+  const toggleMicrophone = async () => {
+    if (micActive) {
+      await stopAudioStream();
+    } else {
+      await startAudioStream();
     }
   };
   
-  const disableDeviceAudio = async () => {
-    setAudioLoading(true);
+  // Send collected audio chunks to the backend
+  const sendAudioChunks = async () => {
+    if (audioChunksRef.current.length === 0) return;
+    
     try {
-      const res = await fetch(`${API_BASE_URL}/audio/disable`);
+      // Combine all chunks into a single blob
+      const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/wav' });
+      audioChunksRef.current = []; // Clear chunks after combining
       
-      if (!res.ok) {
-        throw new Error(`HTTP error! Status: ${res.status}`);
+      // Skip if blob is too small (likely silent)
+      if (audioBlob.size < 100) {
+        console.log("Audio chunk too small, skipping");
+        return;
       }
       
-      const data = await res.json();
-      console.log('Speaker Disable Response:', data);
-      setStatusMessage('Speaker disabled on ESP32');
-      return true;
-    } catch (err) {
-      console.error('Error disabling speaker:', err);
-      setStatusMessage(`Error disabling speaker: ${err.message}`);
-      return false;
-    } finally {
-      setAudioLoading(false);
+      // Convert blob to raw PCM data that ESP32 can process
+      const audioArrayBuffer = await audioBlob.arrayBuffer();
+      
+      // Send to backend
+      const response = await fetch(`${API_BASE_URL}/audio/stream`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'audio/raw'
+        },
+        body: audioArrayBuffer
+      });
+      
+      if (!response.ok) {
+        throw new Error(`HTTP error! Status: ${response.status}`);
+      }
+      
+      const result = await response.json();
+      console.log(`Sent ${audioBlob.size} bytes of audio data:`, result);
+      
+      // Update last audio sent timestamp
+      setLastAudioSent(Date.now());
+      
+    } catch (error) {
+      console.error("Error sending audio chunks:", error);
     }
   };
 
@@ -206,164 +288,61 @@ export default function AudioStreaming() {
     }
   };
 
-  const toggleSpeaker = async () => {
-    setAudioLoading(true);
+  // Debug utility function
+  const debugAudioSystem = async () => {
+    console.log("Running audio system diagnostics...");
+    setStatusMessage("Running audio diagnostics...");
     
     try {
-      const newAudioEnabledState = !audioEnabled;
+      // 1. Check device status
+      const statusResponse = await fetch(`${API_BASE_URL}/check-device-status`);
+      const deviceStatus = await statusResponse.json();
+      console.log("Device Status:", deviceStatus);
       
-      if (newAudioEnabledState) {
-        // Enable audio on device
-        const success = await enableDeviceAudio();
-        if (!success) throw new Error("Failed to enable audio on device");
-        
-        // If mic is already active, start processing
-        if (micActive && micStream) {
-          initAudioProcessing(micStream);
-        }
-      } else {
-        // Disable audio on device
-        const success = await disableDeviceAudio();
-        if (!success) throw new Error("Failed to disable audio on device");
-        
-        // Stop audio processing
-        stopAudioProcessing();
+      // 2. Play test tone (using LED as test endpoint)
+      const testToneResponse = await fetch(`${API_BASE_URL}/led/on`);
+      console.log("Test tone triggered");
+      setLedOn(true);
+      
+      // 3. Enable audio explicitly
+      const enableResponse = await fetch(`${API_BASE_URL}/audio/enable`);
+      const enableResult = await enableResponse.json();
+      console.log("Audio Enable Response:", enableResult);
+      
+      // 4. Enable passthrough explicitly
+      const passthroughResponse = await fetch(`${API_BASE_URL}/audio/passthrough/enable`);
+      const passthroughResult = await passthroughResponse.json();
+      console.log("Passthrough Enable Response:", passthroughResult);
+      
+      // 5. Check status again to confirm changes
+      const statusResponse2 = await fetch(`${API_BASE_URL}/check-device-status`);
+      const deviceStatus2 = await statusResponse2.json();
+      console.log("Updated Device Status:", deviceStatus2);
+      
+      // 6. Send a test audio packet
+      const testAudio = new ArrayBuffer(1024);
+      const view = new Int16Array(testAudio);
+      
+      // Create a simple sine wave as test audio
+      for (let i = 0; i < view.length; i++) {
+        view[i] = Math.sin(i * 0.1) * 10000; // Simple sine wave
       }
       
-      setAudioEnabled(newAudioEnabledState);
-      
-    } catch (err) {
-      console.error('Error toggling speaker:', err);
-      alert(`Could not toggle speaker: ${err.message}`);
-    } finally {
-      setAudioLoading(false);
-    }
-  };
-  
-  const initAudioProcessing = (stream) => {
-    if (!stream) return;
-    
-    try {
-      // Stop any existing audio processing
-      stopAudioProcessing();
-      
-      // Create audio context and connect microphone
-      const audioContext = new (window.AudioContext || window.webkitAudioContext)({
-        sampleRate: 16000 // Lower to 16kHz for ESP32 compatibility
-      });
-      audioContextRef.current = audioContext;
-      
-      // Create a processor node with appropriate buffer size for low latency
-      const bufferSize = 1024; // Small buffer for less latency
-      let processorNode;
-      
-      if (audioContext.createScriptProcessor) {
-        processorNode = audioContext.createScriptProcessor(bufferSize, 1, 1);
-        processorNodeRef.current = processorNode;
-        
-        // Set up the audio processing callback
-        processorNode.onaudioprocess = (e) => {
-          if (!audioEnabled) return;
-          
-          const inputBuffer = e.inputBuffer.getChannelData(0);
-          
-          // Convert float32 to Int16 for more efficient transmission
-          const pcmData = new Int16Array(inputBuffer.length);
-          for (let i = 0; i < inputBuffer.length; i++) {
-            pcmData[i] = Math.max(-32768, Math.min(32767, inputBuffer[i] * 32767));
-          }
-          
-          // Add to chunks for sending
-          audioChunksRef.current.push(pcmData.buffer);
-        };
-        
-        // Connect the microphone to the processor
-        const source = audioContext.createMediaStreamSource(stream);
-        source.connect(processorNode);
-        processorNode.connect(audioContext.destination);
-        
-        // Set up regular interval to send audio chunks (50ms for low latency)
-        audioIntervalRef.current = setInterval(sendAudioChunks, 50);
-        
-        console.log('Audio processing initialized');
-        setStatusMessage('Audio streaming active');
-      } else {
-        console.error('ScriptProcessorNode is not supported in this browser');
-        setStatusMessage('Your browser does not support the required audio features');
-      }
-    } catch (err) {
-      console.error('Error setting up audio processing:', err);
-      setStatusMessage(`Audio processing error: ${err.message}`);
-    }
-  };
-  
-  const stopAudioProcessing = () => {
-    // Clear sending interval
-    if (audioIntervalRef.current) {
-      clearInterval(audioIntervalRef.current);
-      audioIntervalRef.current = null;
-    }
-    
-    // Disconnect processor node
-    if (processorNodeRef.current) {
-      processorNodeRef.current.disconnect();
-      processorNodeRef.current = null;
-    }
-    
-    // Close audio context
-    if (audioContextRef.current) {
-      if (audioContextRef.current.state !== 'closed') {
-        try {
-          audioContextRef.current.close();
-        } catch (err) {
-          console.warn('Error closing audio context:', err);
-        }
-      }
-      audioContextRef.current = null;
-    }
-    
-    // Clear audio chunks
-    audioChunksRef.current = [];
-    
-    console.log('Audio processing stopped');
-  };
-
-  const sendAudioChunks = async () => {
-    if (!audioEnabled || audioChunksRef.current.length === 0) return;
-    
-    try {
-      // Create a copy of the current chunks and clear the original array
-      const chunksToSend = [...audioChunksRef.current];
-      audioChunksRef.current = [];
-      
-      // Combine all chunks into a single blob
-      const totalSize = chunksToSend.reduce((acc, chunk) => acc + chunk.byteLength, 0);
-      const concatenated = new Uint8Array(totalSize);
-      
-      let offset = 0;
-      chunksToSend.forEach(chunk => {
-        concatenated.set(new Uint8Array(chunk), offset);
-        offset += chunk.byteLength;
-      });
-      
-      const blob = new Blob([concatenated], { type: 'audio/raw' });
-      
-      // Send to server
       const response = await fetch(`${API_BASE_URL}/audio/stream`, {
         method: 'POST',
-        body: blob
+        headers: {
+          'Content-Type': 'audio/raw'
+        },
+        body: testAudio
       });
       
-      if (!response.ok) {
-        throw new Error(`HTTP error! Status: ${response.status}`);
-      }
+      const result = await response.json();
+      console.log("Test audio packet result:", result);
+      setStatusMessage("Diagnostics complete. Check console for results.");
       
-      // Update last audio sent timestamp
-      setLastAudioSent(Date.now());
-      
-    } catch (err) {
-      console.error('Error sending audio chunks:', err);
-      // Don't update status message on every failed chunk to avoid spamming UI
+    } catch (error) {
+      console.error("Diagnostics error:", error);
+      setStatusMessage(`Diagnostics error: ${error.message}`);
     }
   };
 
@@ -378,25 +357,17 @@ export default function AudioStreaming() {
   // Clean up resources when component unmounts
   useEffect(() => {
     return () => {
-      // Stop polling
-      stopStatusPolling();
-      
-      // Stop audio processing
-      stopAudioProcessing();
-      
-      // Disable audio on device
-      if (audioEnabled) {
-        disableDeviceAudio().catch(err => {
-          console.error('Error disabling audio on unmount:', err);
+      // Stop all audio streaming and processing
+      if (micActive) {
+        stopAudioStream().catch(err => {
+          console.error('Error stopping audio on unmount:', err);
         });
       }
       
-      // Stop microphone stream
-      if (micStream) {
-        micStream.getTracks().forEach(track => track.stop());
-      }
+      // Stop polling
+      stopStatusPolling();
     };
-  }, [micStream, audioEnabled]);
+  }, [micActive]);
 
   const openModal = () => {
     setIsOverviewOpen(true);
@@ -434,6 +405,11 @@ export default function AudioStreaming() {
     } else {
       return `ESP32 ${deviceStatus.connectionState || 'Unknown'}. Check device connection.`;
     }
+  };
+
+  // Toggle debug mode
+  const toggleDebugMode = () => {
+    setDebugMode(!debugMode);
   };
 
   return (
@@ -500,12 +476,6 @@ export default function AudioStreaming() {
         <div className="mt-2 p-2 bg-blue-50 text-blue-800 rounded-md w-full text-center">
           {getDetailedStatus()}
         </div>
-        
-        {statusMessage && (
-          <div className="mt-2 p-2 bg-blue-50 text-blue-800 rounded-md">
-            {statusMessage}
-          </div>
-        )}
 
         {/* Control Buttons */}
         <div className="flex flex-col gap-3 w-full">
@@ -518,13 +488,13 @@ export default function AudioStreaming() {
                 : 'bg-dark-grayish-orange hover:bg-yellow'
             }`}
             onClick={toggleLED}
-            disabled={isLoading}
+            disabled={isLoading || micLoading}
           >
             {isLoading
               ? 'Processing...'
               : ledOn
-              ? 'TURN OFF'
-              : 'TURN ON'}
+              ? 'TURN OFF LED'
+              : 'TURN ON LED'}
           </button>
         </div>
         <div className="flex flex-col gap-3 w-full">
@@ -540,10 +510,38 @@ export default function AudioStreaming() {
           </button>
         </div>
 
+        {/* Debug Section */}
+        <div className="mt-4 w-full">
+          <button 
+            className="text-sm text-gray-500 hover:text-gray-700"
+            onClick={toggleDebugMode}
+          >
+            {debugMode ? 'Hide Debug Options' : 'Show Debug Options'}
+          </button>
+          
+          {debugMode && (
+            <div className="mt-2 p-4 bg-gray-100 rounded-md">
+              <h3 className="font-medium mb-2">Debug Tools</h3>
+              <button
+                className="bg-purple-600 hover:bg-purple-700 text-white py-2 px-4 rounded-md text-sm"
+                onClick={debugAudioSystem}
+              >
+                Run Audio Diagnostics
+              </button>
+              
+              <div className="mt-3 text-xs text-gray-600">
+                <p>Last audio packet sent: {lastAudioSent ? new Date(lastAudioSent).toLocaleTimeString() : 'None'}</p>
+                <p>Audio context: {audioContextRef.current ? audioContextRef.current.state : 'None'}</p>
+                <p>Media recorder: {mediaRecorderRef.current ? mediaRecorderRef.current.state : 'None'}</p>
+                <p>Audio streaming: {streamIntervalRef.current ? 'Active' : 'Inactive'}</p>
+              </div>
+            </div>
+          )}
+        </div>
+
         <p className="mt-4 text-sm text-gray-600">
           When you enable the microphone, audio will automatically be streamed to the ESP32 speaker.
         </p>
-
       </div>
     </div>
   );
